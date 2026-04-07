@@ -193,3 +193,68 @@ abstract contract AleenaAdmin {
     function setGuardian(address nextGuardian) external onlyAdmin {
         if (nextGuardian == address(0)) revert AA_ZeroAddress();
         address old = guardian;
+        if (old == nextGuardian) revert AA_SameValue();
+        guardian = nextGuardian;
+        emit Aleena_GuardianSet(old, nextGuardian);
+    }
+
+    function setPaused(bool on) external onlyGuardian {
+        if (paused == on) revert AA_SameValue();
+        paused = on;
+        emit Aleena_PauseSet(on);
+    }
+}
+
+/// @notice Main contract: registry for check-ins + signed advice capsules + soulbound badges.
+contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
+    using AleenaAddress for address payable;
+
+    // -----------------------------
+    // Custom errors (unique names)
+    // -----------------------------
+    error ALEENA_Zero();
+    error ALEENA_BadRange();
+    error ALEENA_BadFee();
+    error ALEENA_BadTime();
+    error ALEENA_BadgeLocked();
+    error ALEENA_NoSuchBadge();
+    error ALEENA_NotHolder();
+    error ALEENA_SignatureInvalid();
+    error ALEENA_SignerMismatch();
+    error ALEENA_CapsuleExists();
+    error ALEENA_CapsuleMissing();
+    error ALEENA_EntropyWeak();
+    error ALEENA_TooLarge();
+    error ALEENA_TransferBlocked();
+    error ALEENA_AlreadyUsed();
+    error ALEENA_WithdrawalEmpty();
+    error ALEENA_TreasuryNotSet();
+
+    // -----------------------------
+    // Events (distinct + indexable)
+    // -----------------------------
+    event Aleena_CheckIn(
+        address indexed who,
+        uint40 indexed dayKey,
+        uint16 mood,
+        uint16 energy,
+        uint16 stress,
+        uint8 intent,
+        bytes16 glyph
+    );
+
+    event Aleena_CapsuleDeclared(
+        bytes32 indexed capsuleId,
+        address indexed client,
+        address indexed counselor,
+        uint64 createdAt,
+        uint96 priceWei,
+        bytes32 promptHash,
+        bytes32 answerHash
+    );
+
+    event Aleena_CapsuleConsumed(bytes32 indexed capsuleId, address indexed consumer, uint96 paidWei);
+    event Aleena_Tip(address indexed from, address indexed to, uint256 value, bytes16 note);
+
+    event Aleena_BadgeMinted(address indexed to, uint256 indexed badgeId, uint8 kind, bytes20 salt);
+    event Aleena_BadgeBurned(address indexed from, uint256 indexed badgeId);
