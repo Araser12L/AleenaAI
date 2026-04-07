@@ -128,3 +128,68 @@ abstract contract AleenaReentrancyGuard {
     uint256 private _guard;
 
     modifier nonReentrant() {
+        if (_guard == 2) revert AR_Reentry();
+        _guard = 2;
+        _;
+        _guard = 1;
+    }
+}
+
+/// @notice Two-step admin with an optional guardian pause.
+abstract contract AleenaAdmin {
+    error AA_Unauthorized();
+    error AA_ZeroAddress();
+    error AA_SameValue();
+    error AA_Paused();
+    error AA_NotGuardian();
+
+    event Aleena_AdminProposed(address indexed admin, address indexed proposed);
+    event Aleena_AdminAccepted(address indexed oldAdmin, address indexed newAdmin);
+    event Aleena_GuardianSet(address indexed oldGuardian, address indexed newGuardian);
+    event Aleena_PauseSet(bool paused);
+
+    address public admin;
+    address public proposedAdmin;
+    address public guardian;
+    bool public paused;
+
+    modifier onlyAdmin() {
+        if (msg.sender != admin) revert AA_Unauthorized();
+        _;
+    }
+
+    modifier onlyGuardian() {
+        if (msg.sender != guardian) revert AA_NotGuardian();
+        _;
+    }
+
+    modifier whenActive() {
+        if (paused) revert AA_Paused();
+        _;
+    }
+
+    constructor(address guardian_) {
+        admin = msg.sender;
+        proposedAdmin = address(0);
+        guardian = guardian_;
+        paused = false;
+    }
+
+    function proposeAdmin(address next) external onlyAdmin {
+        if (next == address(0)) revert AA_ZeroAddress();
+        proposedAdmin = next;
+        emit Aleena_AdminProposed(admin, next);
+    }
+
+    function acceptAdmin() external {
+        address p = proposedAdmin;
+        if (msg.sender != p || p == address(0)) revert AA_Unauthorized();
+        address old = admin;
+        admin = p;
+        proposedAdmin = address(0);
+        emit Aleena_AdminAccepted(old, p);
+    }
+
+    function setGuardian(address nextGuardian) external onlyAdmin {
+        if (nextGuardian == address(0)) revert AA_ZeroAddress();
+        address old = guardian;
