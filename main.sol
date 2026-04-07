@@ -63,3 +63,68 @@ library AleenaStrings {
         bytes memory out = new bytes(2 + len * 2);
         out[0] = "0";
         out[1] = "x";
+        for (uint256 i = 0; i < len; ++i) {
+            uint8 b = uint8(v >> (8 * (len - 1 - i)));
+            out[2 + 2 * i] = _HEX[b >> 4];
+            out[3 + 2 * i] = _HEX[b & 0x0f];
+        }
+        return string(out);
+    }
+}
+
+/// @notice Utility library: ECDSA signature recovery (compact, no malleability).
+library AleenaECDSA {
+    error AE_BadSigLength();
+    error AE_BadS();
+    error AE_BadV();
+
+    // secp256k1n/2
+    uint256 internal constant _SECP256K1N_HALF =
+        0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
+
+    function recover(bytes32 digest, bytes memory sig) internal pure returns (address) {
+        if (sig.length != 65) revert AE_BadSigLength();
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            r := mload(add(sig, 0x20))
+            s := mload(add(sig, 0x40))
+            v := byte(0, mload(add(sig, 0x60)))
+        }
+        if (uint256(s) > _SECP256K1N_HALF) revert AE_BadS();
+        if (v != 27 && v != 28) revert AE_BadV();
+        return ecrecover(digest, v, r, s);
+    }
+}
+
+/// @notice Utility library: EIP-712 domain separator builder.
+abstract contract AleenaEIP712 {
+    bytes32 private immutable _HASHED_NAME;
+    bytes32 private immutable _HASHED_VERSION;
+    bytes32 private immutable _TYPE_HASH;
+
+    constructor(string memory name, string memory version) {
+        _HASHED_NAME = keccak256(bytes(name));
+        _HASHED_VERSION = keccak256(bytes(version));
+        _TYPE_HASH = keccak256(
+            "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+        );
+    }
+
+    function _domainSeparatorV4() internal view returns (bytes32) {
+        return keccak256(abi.encode(_TYPE_HASH, _HASHED_NAME, _HASHED_VERSION, block.chainid, address(this)));
+    }
+
+    function _hashTypedDataV4(bytes32 structHash) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
+    }
+}
+
+/// @notice Simple nonReentrant guard (single slot).
+abstract contract AleenaReentrancyGuard {
+    error AR_Reentry();
+    uint256 private _guard;
+
+    modifier nonReentrant() {
