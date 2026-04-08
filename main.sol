@@ -518,3 +518,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
     }
 
     function capsuleState(bytes32 capsuleId) external view returns (CapsuleState) {
+        Capsule storage c = _capsules[capsuleId];
+        if (c.state == CapsuleState.Declared && c.expiresAt != 0 && block.timestamp > c.expiresAt) {
+            return CapsuleState.Expired;
+        }
+        return c.state;
+    }
+
+    function declareCapsule(CapsulePermit calldata p, bytes calldata signature) external whenActive {
+        // any caller may relay; signature binds the content.
+        if (p.capsuleId == bytes32(0)) revert ALEENA_Zero();
+        if (p.client == address(0) || p.counselor == address(0)) revert ALEENA_Zero();
+        if (p.promptHash == bytes32(0) || p.answerHash == bytes32(0)) revert ALEENA_Zero();
+
+        if (usedNonce[p.nonce]) revert ALEENA_AlreadyUsed();
+        usedNonce[p.nonce] = true;
+
+        uint64 nowTs = uint64(block.timestamp);
+        if (p.createdAt == 0 || p.createdAt > nowTs + 3 minutes) revert ALEENA_BadTime();
+        if (p.expiresAt == 0) revert ALEENA_BadTime();
+        if (p.expiresAt < p.createdAt + 30 minutes) revert ALEENA_BadTime();
+        if (p.expiresAt > p.createdAt + _CAPSULE_TTL_SECS) revert ALEENA_BadTime();
+
+        uint96 price = p.priceWei;
+        if (price < minCapsulePriceWei || price > maxCapsulePriceWei) revert ALEENA_BadFee();
+
+        Capsule storage existing = _capsules[p.capsuleId];
+        if (existing.state != CapsuleState.Null) revert ALEENA_CapsuleExists();
+
+        bytes32 structHash = keccak256(
+            abi.encode(
+                _CAPSULE_TYPEHASH,
+                p.capsuleId,
+                p.client,
+                p.counselor,
+                p.createdAt,
+                p.priceWei,
+                p.promptHash,
+                p.answerHash,
+                p.expiresAt,
+                p.nonce
+            )
+        );
+        bytes32 digest = _hashTypedDataV4(structHash);
+
+        _assertValidSigner(digest, signature);
+
+        _capsules[p.capsuleId] = Capsule({
+            client: p.client,
+            counselor: p.counselor,
+            createdAt: p.createdAt,
+            expiresAt: p.expiresAt,
+            priceWei: price,
+            promptHash: p.promptHash,
+            answerHash: p.answerHash,
+            state: CapsuleState.Declared
+        });
+
+        tone = keccak256(abi.encodePacked(tone, "declare", p.capsuleId, p.client, p.counselor, price, p.promptHash));
+
+        emit Aleena_CapsuleDeclared(
+            p.capsuleId,
+            p.client,
+            p.counselor,
+            p.createdAt,
+            price,
