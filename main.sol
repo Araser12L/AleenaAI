@@ -778,3 +778,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
     {
         DayCheckIn memory d = _checkins[who][dk];
         return (d.mood, d.energy, d.stress, d.intent, d.glyph, d.at);
+    }
+
+    function capsuleHashes(bytes32 capsuleId) external view returns (bytes32 promptHash, bytes32 answerHash) {
+        Capsule storage c = _capsules[capsuleId];
+        if (c.state == CapsuleState.Null) revert ALEENA_CapsuleMissing();
+        return (c.promptHash, c.answerHash);
+    }
+
+    function capsuleParties(bytes32 capsuleId) external view returns (address client, address counselor, uint64 createdAt, uint64 expiresAt) {
+        Capsule storage c = _capsules[capsuleId];
+        if (c.state == CapsuleState.Null) revert ALEENA_CapsuleMissing();
+        return (c.client, c.counselor, c.createdAt, c.expiresAt);
+    }
+
+    function capsulePrice(bytes32 capsuleId) external view returns (uint96) {
+        Capsule storage c = _capsules[capsuleId];
+        if (c.state == CapsuleState.Null) revert ALEENA_CapsuleMissing();
+        return c.priceWei;
+    }
+
+    // -----------------------------
+    // “Soft advice” helpers (pure)
+    // -----------------------------
+    // These functions are intentionally pure so apps can call via eth_call.
+    // They do not store personal data; they just generate small guidance strings.
+
+    function microAdvice(uint16 mood, uint16 energy, uint16 stress) external pure returns (string memory) {
+        // mood: 0..1023, energy: 0..1023, stress: 0..1023
+        if (mood <= 170 && stress >= 740) return "Take the next 120 seconds: breathe low and slow, unclench your jaw, name one safe thing you can see.";
+        if (mood <= 220 && energy <= 220) return "Tiny step only: drink water, open a window, and do one task for 3 minutes. Stop when the timer ends.";
+        if (stress >= 880) return "High stress moment: lower your demands. Pick one boundary: 'not right now' is a complete sentence.";
+        if (mood >= 820 && energy >= 650) return "You have momentum. Use it gently: choose one meaningful thing and do it with care, not speed.";
+        if (mood >= 720 && stress <= 240) return "You’re steady. Protect the calm: no doom-scrolling, no overpromising. Keep it simple.";
+        if (energy >= 820 && stress >= 650) return "Big energy with big stress: move your body for 6 minutes to discharge it, then decide.";
+        if (mood <= 300 && stress <= 320) return "Low mood, low alarm: seek warmth. Text someone safe, or do something sensory (tea, shower, clean sheets).";
+        return "Check your basics: water, food, light, movement, connection. Then pick the smallest next step you can actually do.";
+    }
+
+    function reframe(bytes32 feelingTag) external pure returns (string memory) {
+        // feelingTag is app-defined (e.g., keccak256("guilt"), etc.)
+        if (feelingTag == keccak256("guilt")) return "Guilt can be a compass, not a cage. What value is it pointing to—and what’s one repair you can realistically make?";
+        if (feelingTag == keccak256("shame")) return "Shame says 'I am bad.' Try swapping to 'I did something I regret.' You are still allowed to learn and belong.";
+        if (feelingTag == keccak256("anger")) return "Anger often protects something tender. What boundary was crossed, and what boundary do you need next?";
+        if (feelingTag == keccak256("grief")) return "Grief is love with nowhere to go. Let it have a small place today—one memory, one tear, one breath.";
+        if (feelingTag == keccak256("fear")) return "Fear zooms in. Zoom out: what’s the most likely outcome, the worst outcome, and what support would you use if it happened?";
+        if (feelingTag == keccak256("lonely")) return "Loneliness is a signal, not a verdict. Can you make one bid for connection—low stakes, honest, small?";
+        return "Name it precisely, then soften it: 'I’m having the thought that…' gives you a little space to choose your next move.";
+    }
+
+    function seedGlyph(address who, uint40 dk) external view returns (bytes16) {
+        // Deterministic “glyph seed” for UI: depends on who+dayKey+tone.
+        bytes32 x = keccak256(abi.encodePacked("glyph", who, dk, tone, block.chainid));
+        return bytes16(x);
+    }
+
+    // -----------------------------
+    // Defensive: prevent huge calldata
+    // -----------------------------
+    // A few externally-called functions accept bytes calldata. While EVM already charges,
+    // we cap for UI mistakes and keep memcopies predictable.
+    function guardPayloadSize(uint256 n) external pure returns (bool) {
+        if (n > 16_384) revert ALEENA_TooLarge();
+        return true;
+    }
+}
