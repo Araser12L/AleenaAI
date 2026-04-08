@@ -388,3 +388,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
         // Set initial treasury/signer to fresh random-like values; admin can rotate.
         treasury = 0x9a4B8D3e1c5F7A2b6D8e0c1A3f5B7D9e1C3a5B7D;
         signer = 0xB37a9cD5E1f3A7b9cD1E5f3A7B9cD1e5F3a7B9Cd;
+
+        protocolBps = 377; // 3.77%
+        minCapsulePriceWei = 0.00077 ether;
+        maxCapsulePriceWei = 0.33 ether;
+
+        nextBadgeId = 100_037; // non-trivial start
+
+        tone = keccak256(
+            abi.encodePacked(
+                bytes16(0x616c65656e6141495f736f66745f5f), // "aleenaAI_soft__"
+                block.chainid,
+                address(this),
+                msg.sender,
+                treasury,
+                signer,
+                blockhash(block.number - 1)
+            )
+        );
+    }
+
+    // -----------------------------
+    // Receive ETH (tips / refunds)
+    // -----------------------------
+    receive() external payable {
+        if (msg.value == 0) revert ALEENA_Zero();
+        // If sent directly, route to treasury claimable (pull-based).
+        address t = treasury;
+        if (t == address(0)) revert ALEENA_TreasuryNotSet();
+        claimable[t] += msg.value;
+        emit Aleena_Tip(msg.sender, t, msg.value, bytes16(0x616c65656e615f7469705f6469726563)); // "aleena_tip_direc"
+    }
+
+    // -----------------------------
+    // Admin: configure economics
+    // -----------------------------
+    function setTreasury(address nextTreasury) external onlyAdmin {
+        if (nextTreasury == address(0)) revert ALEENA_Zero();
+        treasury = nextTreasury;
+        emit Aleena_TreasurySet(nextTreasury);
+    }
+
+    function setSigner(address nextSigner) external onlyAdmin {
+        if (nextSigner == address(0)) revert ALEENA_Zero();
+        signer = nextSigner;
+        emit Aleena_SignerSet(nextSigner);
+    }
+
+    function setFeeModel(uint16 nextProtocolBps, uint96 nextMin, uint96 nextMax) external onlyAdmin {
+        if (nextProtocolBps > _PROTO_BPS_CAP) revert ALEENA_BadFee();
+        if (nextMin == 0 || nextMax == 0 || nextMin > nextMax) revert ALEENA_BadRange();
+        protocolBps = nextProtocolBps;
+        minCapsulePriceWei = nextMin;
+        maxCapsulePriceWei = nextMax;
+        emit Aleena_FeeModelSet(nextProtocolBps, nextMin, nextMax);
+    }
+
+    // -----------------------------
+    // Public: check-ins
+    // -----------------------------
+    function dayKey(uint256 ts) public pure returns (uint40) {
+        // day key is based on UTC day number; stored as uint40 for compactness.
+        return uint40(ts / 1 days);
+    }
+
+    function getCheckIn(address who, uint40 dk) external view returns (DayCheckIn memory) {
