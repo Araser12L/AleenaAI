@@ -648,3 +648,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
         if (uint256(e) & 0xffff == 0) revert ALEENA_EntropyWeak();
 
         uint256 id = nextBadgeId;
+        unchecked {
+            nextBadgeId = id + 1;
+        }
+
+        _badges[id] = Badge({holder: to, mintedAt: uint40(block.timestamp), kind: kind, salt: salt, burned: false});
+        badgeCount[to] += 1;
+
+        tone = keccak256(abi.encodePacked(tone, "badge+", to, id, kind, salt));
+
+        emit Aleena_BadgeMinted(to, id, kind, salt);
+    }
+
+    function burnBadge(uint256 badgeId) external nonReentrant {
+        Badge storage b = _badges[badgeId];
+        if (b.holder == address(0) || b.burned) revert ALEENA_NoSuchBadge();
+        if (msg.sender != b.holder && msg.sender != admin) revert AA_Unauthorized();
+
+        address holder = b.holder;
+        b.burned = true;
+        b.holder = address(0);
+        badgeCount[holder] -= 1;
+
+        // If badge registry is used by an app, burning lets users “let go” without deletions.
+        tone = keccak256(abi.encodePacked(tone, "badge-", holder, badgeId, b.kind, b.salt));
+        emit Aleena_BadgeBurned(holder, badgeId);
+    }
+
+    // -----------------------------
+    // Transfer-blocking surface area
+    // -----------------------------
+    // Some indexers and UI tooling expect "transfer" functions. We intentionally block.
+    function transferFrom(address, address, uint256) external pure {
+        revert ALEENA_TransferBlocked();
+    }
+
+    function safeTransferFrom(address, address, uint256) external pure {
+        revert ALEENA_TransferBlocked();
+    }
+
+    function safeTransferFrom(address, address, uint256, bytes calldata) external pure {
+        revert ALEENA_TransferBlocked();
+    }
+
+    // -----------------------------
+    // Small helpers for apps
+    // -----------------------------
+    function capsuleDigest(CapsulePermit calldata p) external view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                _CAPSULE_TYPEHASH,
+                p.capsuleId,
+                p.client,
+                p.counselor,
+                p.createdAt,
+                p.priceWei,
+                p.promptHash,
+                p.answerHash,
+                p.expiresAt,
+                p.nonce
+            )
+        );
+        return _hashTypedDataV4(structHash);
+    }
+
+    function capsuleIdFrom(bytes32 promptHash, bytes32 answerHash, address client, uint64 createdAt) external view returns (bytes32) {
