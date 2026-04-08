@@ -323,3 +323,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
 
     // user => dayKey => checkin
     mapping(address => mapping(uint40 => DayCheckIn)) private _checkins;
+
+    // -----------------------------
+    // Capsules (hash-anchored advice)
+    // -----------------------------
+    enum CapsuleState {
+        Null,
+        Declared,
+        Consumed,
+        Expired
+    }
+
+    struct Capsule {
+        address client;
+        address counselor;
+        uint64 createdAt;
+        uint64 expiresAt;
+        uint96 priceWei;
+        bytes32 promptHash;
+        bytes32 answerHash;
+        CapsuleState state;
+    }
+
+    mapping(bytes32 => Capsule) private _capsules;
+
+    // -----------------------------
+    // Soulbound badges (minimal NFT-like)
+    // -----------------------------
+    // This is not ERC721. It’s a compact, non-transferable badge registry.
+    struct Badge {
+        address holder;
+        uint40 mintedAt;
+        uint8 kind; // 1..255, app-defined
+        bytes20 salt;
+        bool burned;
+    }
+
+    uint256 public nextBadgeId;
+    mapping(uint256 => Badge) private _badges;
+    mapping(address => uint32) public badgeCount;
+
+    // -----------------------------
+    // Withdrawals (pull payments)
+    // -----------------------------
+    mapping(address => uint256) public claimable;
+
+    // -----------------------------
+    // Rolling “tone” accumulator
+    // -----------------------------
+    bytes32 public tone;
+
+    // -----------------------------
+    // Constructor (no placeholders)
+    // -----------------------------
+    constructor()
+        AleenaEIP712("aleenaAI", "1.7.13")
+        AleenaAdmin(0x2a1d5A0c9cB1dE7fF4e6C8d22c1bA7c90b5a38E1)
+    {
+        // Random-looking, fixed addresses: do not require user input.
+        GENESIS_STEWARD = 0x7bE2a7d93F0e3c1bD4a26aD1A0C3c40F9fE9D1b7;
+        QUIET_GUARD = 0x0F6c4D2B1cAa5E7c9d2B0bF8eA3c9E42a0fB5dC6;
+        DUST_SINK = 0xC9e3f7a1bD2c4a6E8F0b1D3c5A7e9fB1cD3e5A71;
+
+        // Set initial treasury/signer to fresh random-like values; admin can rotate.
+        treasury = 0x9a4B8D3e1c5F7A2b6D8e0c1A3f5B7D9e1C3a5B7D;
+        signer = 0xB37a9cD5E1f3A7b9cD1E5f3A7B9cD1e5F3a7B9Cd;
