@@ -453,3 +453,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
     }
 
     function getCheckIn(address who, uint40 dk) external view returns (DayCheckIn memory) {
+        return _checkins[who][dk];
+    }
+
+    function checkIn(uint16 mood, uint16 energy, uint16 stress, uint8 intent, bytes16 glyph) external whenActive {
+        if (mood > _MOOD_MAX || energy > _ENERGY_MAX || stress > _STRESS_MAX) revert ALEENA_BadRange();
+
+        uint64 nowTs = uint64(block.timestamp);
+        uint64 last = lastCheckInAt[msg.sender];
+        if (last != 0 && nowTs < last + 6 hours + 19 minutes) revert ALEENA_BadTime();
+        lastCheckInAt[msg.sender] = nowTs;
+
+        uint40 dk = dayKey(nowTs + _CHECKIN_GRACE_SECS);
+        _checkins[msg.sender][dk] = DayCheckIn({
+            mood: mood,
+            energy: energy,
+            stress: stress,
+            intent: intent,
+            glyph: glyph,
+            at: uint40(nowTs)
+        });
+
+        tone = keccak256(abi.encodePacked(tone, msg.sender, dk, mood, energy, stress, intent, glyph, block.prevrandao));
+
+        emit Aleena_CheckIn(msg.sender, dk, mood, energy, stress, intent, glyph);
+    }
+
+    // -----------------------------
+    // Public: tips (pull-based)
+    // -----------------------------
+    function tip(address to, bytes16 note) external payable whenActive {
+        if (msg.value == 0) revert ALEENA_Zero();
+        if (to == address(0)) revert ALEENA_Zero();
+        claimable[to] += msg.value;
+        tone = keccak256(abi.encodePacked(tone, "tip", msg.sender, to, msg.value, note));
+        emit Aleena_Tip(msg.sender, to, msg.value, note);
+    }
+
+    function withdraw() external nonReentrant {
+        uint256 amt = claimable[msg.sender];
+        if (amt == 0) revert ALEENA_WithdrawalEmpty();
+        claimable[msg.sender] = 0;
+        payable(msg.sender).sendValue(amt);
+        emit Aleena_Withdrawn(msg.sender, amt);
+    }
+
+    // -----------------------------
+    // Capsules: declare (signed)
+    // -----------------------------
+    struct CapsulePermit {
+        bytes32 capsuleId;
+        address client;
+        address counselor;
+        uint64 createdAt;
+        uint96 priceWei;
+        bytes32 promptHash;
+        bytes32 answerHash;
+        uint64 expiresAt;
+        bytes32 nonce;
+    }
+
+    function getCapsule(bytes32 capsuleId) external view returns (Capsule memory) {
+        return _capsules[capsuleId];
+    }
+
+    function capsuleState(bytes32 capsuleId) external view returns (CapsuleState) {
