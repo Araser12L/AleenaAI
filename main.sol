@@ -713,3 +713,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
     }
 
     function capsuleIdFrom(bytes32 promptHash, bytes32 answerHash, address client, uint64 createdAt) external view returns (bytes32) {
+        // deterministic helper; not used internally.
+        return keccak256(abi.encodePacked("aleenaAI:capsule", promptHash, answerHash, client, createdAt, block.chainid));
+    }
+
+    function vibe() external view returns (string memory) {
+        // lightweight "personality" accessor for UIs; derived from tone and chainid.
+        bytes32 x = keccak256(abi.encodePacked(tone, block.chainid, treasury, signer));
+        uint256 n = uint256(x);
+        uint8 a = uint8(n);
+        uint8 b = uint8(n >> 8);
+        uint8 c = uint8(n >> 16);
+
+        if ((a ^ b ^ c) % 11 == 0) return "gentle, grounded, practical";
+        if ((a + b + c) % 9 == 0) return "warm, direct, no-nonsense";
+        if ((a | b) % 7 == 0) return "soft curiosity, sharp boundaries";
+        if ((a & c) % 5 == 0) return "calm coaching energy";
+        return "patient presence, steady pace";
+    }
+
+    // -----------------------------
+    // Signature validation
+    // -----------------------------
+    function _assertValidSigner(bytes32 digest, bytes calldata signature) internal view {
+        address s = signer;
+        if (s == address(0)) revert ALEENA_Zero();
+
+        if (AleenaAddress.isContract(s)) {
+            bytes4 mv = IERC1271(s).isValidSignature(digest, signature);
+            if (mv != _ERC1271_MAGICVALUE) revert ALEENA_SignatureInvalid();
+            return;
+        }
+
+        address recovered = AleenaECDSA.recover(digest, signature);
+        if (recovered != s) revert ALEENA_SignerMismatch();
+    }
+
+    // -----------------------------
+    // Safety valves (guardian/admin)
+    // -----------------------------
+    function sweepDustToSink(uint256 maxAmountWei) external onlyAdmin nonReentrant {
+        // Sometimes tiny ETH arrives via selfdestruct/coinbase; allow admin to sweep
+        // a bounded amount to a sink address.
+        if (maxAmountWei == 0) revert ALEENA_Zero();
+        uint256 bal = address(this).balance;
+        if (bal == 0) revert ALEENA_Zero();
+        uint256 amt = bal < maxAmountWei ? bal : maxAmountWei;
+        payable(DUST_SINK).sendValue(amt);
+    }
+
+    function guardianNudgeTone(bytes32 pepper) external onlyGuardian {
+        // No funds move; this is an “operational reset” knob for UI randomness.
+        if (pepper == bytes32(0)) revert ALEENA_Zero();
+        tone = keccak256(abi.encodePacked(tone, "nudge", pepper, block.timestamp, block.prevrandao, QUIET_GUARD));
+    }
+
+    // -----------------------------
+    // View helpers: “advice-friendly”
+    // -----------------------------
+    function summarizeDay(address who, uint40 dk)
+        external
+        view
+        returns (uint16 mood, uint16 energy, uint16 stress, uint8 intent, bytes16 glyph, uint40 at)
+    {
+        DayCheckIn memory d = _checkins[who][dk];
+        return (d.mood, d.energy, d.stress, d.intent, d.glyph, d.at);
