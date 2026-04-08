@@ -583,3 +583,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
             p.counselor,
             p.createdAt,
             price,
+            p.promptHash,
+            p.answerHash
+        );
+    }
+
+    // -----------------------------
+    // Capsules: consume (pay + route)
+    // -----------------------------
+    function consumeCapsule(bytes32 capsuleId) external payable nonReentrant whenActive {
+        Capsule storage c = _capsules[capsuleId];
+        if (c.state == CapsuleState.Null) revert ALEENA_CapsuleMissing();
+
+        uint64 nowTs = uint64(block.timestamp);
+        if (c.expiresAt != 0 && nowTs > c.expiresAt) {
+            // Mark expired on first touch to reduce future checks.
+            c.state = CapsuleState.Expired;
+            revert ALEENA_BadTime();
+        }
+
+        if (c.state != CapsuleState.Declared) revert ALEENA_BadTime();
+
+        // light anti-spam: avoid rapid consecutive paid consumes from same account
+        uint64 last = lastCapsuleUseAt[msg.sender];
+        if (last != 0 && block.number < uint256(last) + _ANTI_SPAM_BLOCKS) revert ALEENA_BadTime();
+        lastCapsuleUseAt[msg.sender] = uint64(block.number);
+
+        uint96 price = c.priceWei;
+        if (msg.value != uint256(price)) revert ALEENA_BadFee();
+
+        c.state = CapsuleState.Consumed;
+
+        uint256 protoFee = (uint256(price) * uint256(protocolBps)) / _BPS;
+        uint256 counselorShare = uint256(price) - protoFee;
+
+        address t = treasury;
+        if (t == address(0)) revert ALEENA_TreasuryNotSet();
+
+        if (protoFee != 0) claimable[t] += protoFee;
+        claimable[c.counselor] += counselorShare;
+
+        tone = keccak256(
+            abi.encodePacked(tone, "consume", capsuleId, msg.sender, price, protoFee, counselorShare, block.prevrandao)
+        );
+
+        emit Aleena_CapsuleConsumed(capsuleId, msg.sender, price);
+    }
+
+    // -----------------------------
+    // Badges: mint / burn (soulbound)
+    // -----------------------------
+    function getBadge(uint256 badgeId) external view returns (Badge memory) {
+        return _badges[badgeId];
+    }
+
+    function mintBadge(address to, uint8 kind, bytes20 salt) external whenActive {
+        // Anyone can mint themselves; admin can mint for others.
+        if (to == address(0)) revert ALEENA_Zero();
+        if (kind == 0) revert ALEENA_BadRange();
+        if (msg.sender != to && msg.sender != admin) revert AA_Unauthorized();
+
+        // entropy sanity check (avoid obviously repeated salts)
+        bytes32 e = keccak256(abi.encodePacked(to, kind, salt, block.prevrandao, tone));
+        if (uint256(e) & 0xffff == 0) revert ALEENA_EntropyWeak();
+
+        uint256 id = nextBadgeId;
