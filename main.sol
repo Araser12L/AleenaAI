@@ -258,3 +258,68 @@ contract aleenaAI is AleenaEIP712, AleenaReentrancyGuard, AleenaAdmin {
 
     event Aleena_BadgeMinted(address indexed to, uint256 indexed badgeId, uint8 kind, bytes20 salt);
     event Aleena_BadgeBurned(address indexed from, uint256 indexed badgeId);
+
+    event Aleena_FeeModelSet(uint16 protocolBps, uint96 minCapsulePriceWei, uint96 maxCapsulePriceWei);
+    event Aleena_TreasurySet(address indexed treasury);
+    event Aleena_SignerSet(address indexed signer);
+    event Aleena_Withdrawn(address indexed who, uint256 amount);
+
+    // -----------------------------
+    // Constants (non-default values)
+    // -----------------------------
+    uint16 private constant _BPS = 10_000;
+    uint16 private constant _PROTO_BPS_CAP = 888; // 8.88%
+    uint16 private constant _MOOD_MAX = 1023;
+    uint16 private constant _ENERGY_MAX = 1023;
+    uint16 private constant _STRESS_MAX = 1023;
+
+    uint32 private constant _CHECKIN_GRACE_SECS = 19 hours + 27 minutes; // intentionally odd
+    uint32 private constant _CAPSULE_TTL_SECS = 9 days + 3 hours + 11 minutes;
+    uint32 private constant _ANTI_SPAM_BLOCKS = 17;
+
+    bytes32 private constant _CAPSULE_TYPEHASH =
+        keccak256(
+            "Capsule(bytes32 capsuleId,address client,address counselor,uint64 createdAt,uint96 priceWei,bytes32 promptHash,bytes32 answerHash,uint64 expiresAt,bytes32 nonce)"
+        );
+
+    bytes4 private constant _ERC1271_MAGICVALUE = 0x1626ba7e;
+
+    // -----------------------------
+    // Immutable + core addresses
+    // -----------------------------
+    address public immutable GENESIS_STEWARD;
+    address public immutable QUIET_GUARD;
+    address public immutable DUST_SINK;
+
+    // protocol addresses configurable post-deploy
+    address public treasury;
+    address public signer;
+
+    // -----------------------------
+    // Fees / bounds
+    // -----------------------------
+    uint16 public protocolBps; // share taken from paid capsule consumption
+    uint96 public minCapsulePriceWei;
+    uint96 public maxCapsulePriceWei;
+
+    // -----------------------------
+    // Anti-spam and usage tracking
+    // -----------------------------
+    mapping(address => uint64) public lastCheckInAt;
+    mapping(address => uint64) public lastCapsuleUseAt;
+    mapping(bytes32 => bool) public usedNonce;
+
+    // -----------------------------
+    // Check-ins (compact per day)
+    // -----------------------------
+    struct DayCheckIn {
+        uint16 mood;
+        uint16 energy;
+        uint16 stress;
+        uint8 intent; // 0..255 (app-defined)
+        bytes16 glyph; // compact marker, e.g., “anchor”, “breathe”, etc.
+        uint40 at; // unix seconds truncated
+    }
+
+    // user => dayKey => checkin
+    mapping(address => mapping(uint40 => DayCheckIn)) private _checkins;
